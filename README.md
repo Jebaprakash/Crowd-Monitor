@@ -1,120 +1,146 @@
-# Crowd Monitor — End-to-End AI System
+# 🚀 Crowd Monitor — Distributed AI Monitoring System
 
-## Folder Structure
+Crowd Monitor is an end-to-end, high-performance monitoring solution that leverages **YOLOv8** for real-time detection, **LSTM neural networks** for anomaly prediction, and a **Distributed Capture System** that transforms any smartphone into a wireless camera feed.
 
-```
-crowd_monitor/
-├── app.py            # Flask app + routes + video loop
-├── detection.py      # YOLOv8 person detection
-├── density.py        # Density computation & classification
-├── lstm_model.py     # Online LSTM anomaly detection
-├── alerts.py         # Alert evaluation logic
-├── database.py       # MySQL logging
-└── requirements.txt
-```
+![Dashboard Preview](https://img.shields.io/badge/Status-Active-brightgreen)
+![Python](https://img.shields.io/badge/Python-3.9+-blue)
+![Framework](https://img.shields.io/badge/Framework-Flask-lightgrey)
+![AI](https://img.shields.io/badge/AI-YOLOv8%20%7C%20LSTM-orange)
 
-## Setup
+---
 
-### 1. Environment & Dependencies
-It is recommended to use a virtual environment to manage dependencies:
+## 🌟 Key Features
+
+- **📡 Distributed Capture**: Scale your monitoring instantly. Use the `/capture` route to turn any smartphone into a remote camera feed via WiFi/Mobile data.
+- **👁️ Intelligent Detection**: 
+  - **YOLOv8 Engine**: Precise person detection and counting.
+  - **Zone-Based Analysis**: Tracks crowd movement across **Entry, Center, and Exit** zones.
+  - **Privacy First**: Automated **Face Blurring** using Haar cascades to ensure data privacy.
+- **📉 Advanced Analytics**:
+  - **Area-Based Density**: Calculates true density based on physical frame coverage (Low/Medium/High).
+  - **LSTM Anomaly Detection**: Deep learning model that identifies "spontaneous gatherings" by detecting statistical spikes in crowd flow.
+- **🚨 Multi-Channel Alerts**:
+  - **Telegram**: Instant notifications via Bot API.
+  - **Email**: Detailed alerts sent via SMTP.
+  - **Audio**: Siren/Beep indicators on the web dashboard.
+  - **Smart Cooldown**: 5-minute persistent cooldown to prevent notification spam.
+- **📊 Interactive Dashboard**:
+  - Real-time **Chart.js** line graphs for population tracking.
+  - **Snapshots**: Access a gallery of the last 5 high-priority alerts.
+  - **Peak Tracking**: Daily logs of maximum crowd capacity with timestamps.
+
+---
+
+## 🛠️ Technology Stack
+
+| Component | Technology |
+|---|---|
+| **Backend** | Python 3, Flask |
+| **Computer Vision** | OpenCV, Ultralytics YOLOv8 |
+| **Deep Learning** | TensorFlow / Keras (LSTM) |
+| **Database** | MySQL |
+| **Frontend** | HTML5, Vanilla CSS, JS (Chart.js) |
+| **Connectivity** | Ngrok (for Public URLs & QR Access) |
+
+---
+
+## 📂 Project Structure
 
 ```bash
-# Create a virtual environment
+crowd_monitor/
+├── app.py              # Main Flask server & Route Coordinator
+├── detection.py        # YOLOv8 Person Detection & Face Blurring
+├── density.py          # Area-based Density Calculation
+├── lstm_model.py       # Online LSTM Anomaly Detection
+├── alerts.py           # Core Business Logic for Alert Priorities
+├── database.py         # MySQL Persistence & Logging
+├── telegram_alert.py   # Telegram Integration
+├── alert_dispatcher.py # Email & SMS (Twilio) support
+└── requirements.txt    # Dependency list
+```
+
+---
+
+## 🚀 Getting Started
+
+### 1. Prerequisites
+- Python 3.9+
+- MySQL Server
+
+### 2. Installation
+```bash
+# Clone the repository
+git clone https://github.com/Jebaprakash/Crowd-Monitor.git
+cd Crowd-Monitor
+
+# Create and activate virtual environment
 python3 -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-# Activate it
-source .venv/bin/activate
-
-# Install requirements
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-> [!NOTE]
-> If you are on a system where the `python` command is missing, you can install `python-is-python3` via `sudo apt install python-is-python3` or just use `python3`.
+### 3. Configuration
+Create a `.env` file in the root directory:
+```env
+# Database Config
+DB_HOST=localhost
+DB_USER=root
+DB_PASS=your_password
+DB_NAME=crowd_monitor
 
-### 2. Database Configuration
-The system uses MySQL to log crowd events. 
+# Alert Recipients
+ALERT_TO=+910000000000
+EMAIL_TO=recipient@example.com
 
-1. **Create the database**:
-   ```sql
-   CREATE DATABASE crowd_monitor;
-   ```
-   *Tables will be automatically initialized on the first run.*
-
-2. **Configure environment variables**:
-   Create a `.env` file in the root directory with the following variables:
-   ```bash
-   DB_HOST=localhost
-   DB_USER=root
-   DB_PASS=yourpassword
-   DB_NAME=crowd_monitor
-
-   # Alerts configuration
-   ALERT_TO=+910000000000       # Phone number for SMS notifications
-   EMAIL_TO=recipient@example.com # Email for alerts
-
-   # Service accounts
-   SMTP_USER=sender@gmail.com
-   SMTP_PASS=app-specific-password
-   TWILIO_ACCOUNT_SID=sid
-   TWILIO_AUTH_TOKEN=token
-   TWILIO_PHONE_NUMBER=phone
-   ```
-
-### 3. Run the Application
-Ensure your virtual environment is active, then run:
-
-```bash
-python app.py
+# Messaging Credentials
+SMTP_USER=your_email@gmail.com
+SMTP_PASS=your_app_specific_password
+TELEGRAM_TOKEN=your_bot_token
+TELEGRAM_CHAT_ID=your_chat_id
+TWILIO_ACCOUNT_SID=sid
+TWILIO_AUTH_TOKEN=token
+TWILIO_PHONE_NUMBER=phone
 ```
 
-Open your browser at **http://localhost:5000** to view the dashboard.
-it
+### 4. Database Setup
+The system will automatically initialize tables on first run, but you must create the database first:
+```sql
+CREATE DATABASE crowd_monitor;
+```
+
 ---
 
-## Video Source
-Edit `VIDEO_SOURCE` in `app.py`:
-- `0` → webcam
-- `"/path/to/video.mp4"` → video file
+## ⚙️ Usage
 
-## MySQL Schema
-```sql
-CREATE TABLE IF NOT EXISTS crowd_log (
-    id          INT AUTO_INCREMENT PRIMARY KEY,
-    ts          DATETIME NOT NULL,
-    count       INT NOT NULL,
-    density     FLOAT NOT NULL,
-    density_lbl VARCHAR(10) NOT NULL,
-    alert       TINYINT(1) NOT NULL,
-    alert_msg   VARCHAR(255)
-);
+1. **Start the Application**:
+   ```bash
+   python app.py
+   ```
+2. **Access the Dashboard**: Open `http://localhost:5000`.
+3. **Connect Remote Cameras**: 
+   - Scan the **QR Code** printed in the terminal.
+   - On the mobile device, navigate to `/capture` to start streaming frames to the AI engine.
+
+---
+
+## 🗺️ System Architecture
+
+```mermaid
+graph TD
+    A[Video Source / Mobile App] --> B[detection.py: AI Detection]
+    B -->|BBoxes + Blurred Faces| C[density.py: Area Analysis]
+    B -->|Real-time Count| D[lstm_model.py: LSTM Prediction]
+    C -->|Density Label| E[alerts.py: Decision Engine]
+    D -->|Anomaly Flag| E
+    E -->|Alert Trigger| F[app.py: Coordinator]
+    F -->|Persistence| G[database.py: MySQL]
+    F -->|Notification| H[alert_dispatcher.py: Email/SMS/Telegram]
+    F -->|UI Update| I[Web Dashboard]
 ```
 
-## Architecture
+---
 
-```
-Webcam/Video
-    │
-    ▼
-detection.py  ──► YOLOv8n (persons only)
-    │               bounding boxes + count
-    ▼
-density.py    ──► density_norm = count / area
-    │               classify: low / medium / high
-    ▼
-lstm_model.py ──► online LSTM (SEQ_LEN=10)
-    │               anomaly if residual > 2σ
-    ▼
-alerts.py     ──► high density OR anomaly → ALERT
-    │
-    ├──► database.py  (log every 30 frames)
-    └──► Flask routes  /  /video_feed  /status
-```
-
-## API Endpoints
-| Route | Description |
-|-------|-------------|
-| `GET /` | Dashboard UI |
-| `GET /video_feed` | MJPEG stream |
-| `GET /status` | JSON: count, density, alert |
-# Crowd-Monitor
+## 📝 License
+This project is for educational and monitoring purposes. View the `PROJECT_DETAILS.md` for more technical specifics.
