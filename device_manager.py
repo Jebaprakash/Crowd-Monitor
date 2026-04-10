@@ -6,7 +6,7 @@ class DeviceManager:
     def __init__(self):
         self.devices = {} # device_id: metadata
         self.lock = threading.Lock()
-        self.timeout = 30 # seconds before considering a device inactive
+        self.timeout = 120 # seconds before considering a device inactive
 
     def register_device(self, ip_address, custom_name=None):
         with self.lock:

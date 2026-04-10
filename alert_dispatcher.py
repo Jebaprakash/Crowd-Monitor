@@ -41,19 +41,27 @@ def send_alert(alert_msg, cam_id="default"):
             msg = MIMEMultipart()
             msg['From'] = smtp_user
             msg['To'] = email_to
-            msg['Subject'] = "⚠️ CROWD MONITOR ALERT"
+            msg['Subject'] = f"⚠️ CROWD ALERT: {cam_id}"
             
-            body = f"The crowd monitoring system has detected an issue:\n\n{alert_msg}\n\nPlease check the dashboard immediately."
+            body = f"Alert triggered for device: {cam_id}\n\nDetails: {alert_msg}\n\nTime: {time.ctime(now)}\n\nPlease check the dashboard immediately."
             msg.attach(MIMEText(body, 'plain'))
 
-            with smtplib.SMTP(smtp_server, smtp_port) as server:
+            print(f"[Dispatcher] Attempting to send email to {email_to} via {smtp_server}...")
+            # Use explicit timeout for SMTP connection
+            with smtplib.SMTP(smtp_server, smtp_port, timeout=15) as server:
                 server.starttls()
                 server.login(smtp_user, smtp_pass)
                 server.send_message(msg)
-            print(f"[Dispatcher] Email sent to {email_to}")
+            print(f"[Dispatcher] ✅ Email sent successfully to {email_to}")
             any_success = True
+        else:
+            print("[Dispatcher] ⚠️ Email skipped: SMTP_USER, SMTP_PASS, or EMAIL_TO missing in .env")
+    except smtplib.SMTPAuthenticationError:
+        print("[Dispatcher] ❌ Email Error: Authentication failed. Please verify SMTP_PASS (App Password).")
+    except smtplib.SMTPConnectError:
+        print(f"[Dispatcher] ❌ Email Error: Failed to connect to server {smtp_server}.")
     except Exception as e:
-        print(f"[Dispatcher] Email error: {e}")
+        print(f"[Dispatcher] ❌ Email unexpected error: {e}")
 
     # --- 2. SMS Dispatch (Twilio) ---
     try:

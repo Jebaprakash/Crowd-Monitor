@@ -41,7 +41,8 @@ def get_device_state(device_id):
                 "history": [], "last_alert_time": 0,
                 "peak_count": 0, "peak_time": "--:--",
                 "last_date": datetime.date.today(),
-                "lstm": CrowdLSTM()
+                "lstm": CrowdLSTM(),
+                "processed_frame": None  # Latest AI-annotated frame for display
             }
         return device_states[device_id]
 
@@ -52,82 +53,123 @@ def reset_daily_peak(device_id, st):
         st["peak_time"] = "--:--"
         st["last_date"] = today
 
-def generate_frames(device_id):
-    """Generator for a specific device stream."""
-    # If it's a local camera device (prefixed with 'local_')
+# --- Background Processing ---
+# This runs the full AI pipeline per device, independent of anyone watching the stream.
+active_processor_threads = set()
+
+def run_device_processor(device_id):
+    """
+    Background thread: runs YOLO, density, LSTM, DB logging and alerts
+    continuously for a device whether or not anyone watches the video feed.
+    """
+    print(f"[Processor] ✅ Started background thread for: {device_id}")
     cap = None
     if device_id.startswith("local_"):
         try:
             source = int(device_id.split("_")[1])
             cap = cv2.VideoCapture(source)
-        except: pass
+            if not cap.isOpened():
+                print(f"[Processor] ⚠️ Could not open local camera {source}")
+                cap = None
+        except Exception as e:
+            print(f"[Processor] ⚠️ Local camera init error: {e}")
 
     frame_n = 0
     while True:
-        # Pruning check: if device is no longer in dm.devices, stop thread
         if device_id not in dm.devices:
             if cap: cap.release()
+            active_processor_threads.discard(device_id)
+            print(f"[Processor] 🛑 Stopped thread for removed device: {device_id}")
             break
 
-        frame = remote_buffers.get(device_id)
-        
-        if frame is None and cap:
+        # Get frame from local webcam or phone upload buffer
+        frame = None
+        if cap:
             ok, frame = cap.read()
             if not ok:
-                time.sleep(1)
+                time.sleep(0.1)
                 continue
+        else:
+            frame = remote_buffers.get(device_id)
 
         if frame is None:
-            # Placeholder for inactive streams
-            frame = np.zeros((480, 640, 3), dtype=np.uint8)
-            cv2.putText(frame, f"DEVICE {device_id} OFFLINE", (120, 240), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (80, 80, 80), 2)
-            _, buf = cv2.imencode(".jpg", frame)
-            yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n")
-            time.sleep(1)
+            time.sleep(0.05)
             continue
 
-        # Processing Pipeline
+        # --- Full AI Pipeline ---
         frame, count, boxes, zone_counts = detect_persons(frame, blur_faces=BLUR_FACES)
         density = compute_density(boxes, frame)
         density_lbl = classify_density(density)
-        
+
         st = get_device_state(device_id)
         anomaly, reason = st["lstm"].update_and_detect(count)
         alert, alert_msg = evaluate_alert(density_lbl, anomaly, reason)
-        
+
         reset_daily_peak(device_id, st)
         if count > st["peak_count"]:
             st["peak_count"] = count
             st["peak_time"] = datetime.datetime.now().strftime("%H:%M")
             log_peak(device_id, count)
 
-        # Alert Dispatch
+        # Alert dispatch with cooldown
         now = time.time()
         if alert and (now - st["last_alert_time"] > ALERT_COOLDOWN):
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             filename = f"alerts/{device_id}_{timestamp}.jpg"
             cv2.imwrite(filename, frame)
-            # Log to DB
             log_alert_event(device_id, count, density, alert_msg, os.path.basename(filename))
-            
             threading.Thread(target=send_email_alert, args=(f"[{device_id}] {alert_msg}", device_id), daemon=True).start()
             threading.Thread(target=send_telegram_alert, args=(alert_msg, count, density, device_id), daemon=True).start()
             st["last_alert_time"] = now
 
-        # Update State
+        # Update shared state + store processed frame for display
         with state_lock:
-            st.update(count=count, density=density, density_lbl=density_lbl, 
+            st.update(count=count, density=density, density_lbl=density_lbl,
                       alert=alert, alert_msg=alert_msg, zone_counts=zone_counts)
             st["history"].append(count)
             if len(st["history"]) > 30: st["history"].pop(0)
+            st["processed_frame"] = frame
 
+        # DB log every 30 frames
         frame_n += 1
-        if frame_n % 30 == 0: log_entry(device_id, count, density, density_lbl, alert, alert_msg)
-        
-        if frame_n % 2 != 0: continue # Skip frames for UI performance
+        if frame_n % 30 == 0:
+            log_entry(device_id, count, density, density_lbl, alert, alert_msg)
+            print(f"[DB] Logged: {device_id} | count={count} | density={density_lbl} | alert={alert}")
+
+
+def ensure_processor_running(device_id):
+    """Start the background AI processor for a device if not already running."""
+    if device_id not in active_processor_threads:
+        active_processor_threads.add(device_id)
+        t = threading.Thread(target=run_device_processor, args=(device_id,), daemon=True)
+        t.start()
+
+
+def generate_frames(device_id):
+    """
+    Display-only generator: yields the latest processed frame.
+    AI logic is in run_device_processor, NOT here.
+    """
+    ensure_processor_running(device_id)
+    while True:
+        if device_id not in dm.devices:
+            break
+
+        st = device_states.get(device_id)
+        frame = st.get("processed_frame") if st else None
+
+        if frame is None:
+            placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
+            cv2.putText(placeholder, f"DEVICE {device_id} - WAITING FOR FRAMES...",
+                        (30, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (80, 80, 80), 2)
+            _, buf = cv2.imencode(".jpg", placeholder)
+            yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n")
+            time.sleep(0.5)
+            continue
+
         _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 55])
         yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + buf.tobytes() + b"\r\n")
+        time.sleep(0.033)
 
 # --- HTML Templates ---
 DASHBOARD_HTML = """
@@ -453,15 +495,20 @@ CAPTURE_HTML = """
 
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
-            setInterval(() => {
+            setInterval(async () => {
                 canvas.width = video.videoWidth; canvas.height = video.videoHeight;
                 ctx.drawImage(video, 0, 0);
-                canvas.toBlob((blob) => {
+                canvas.toBlob(async (blob) => {
                     const fd = new FormData();
                     fd.append('frame', blob);
-                    fetch('/upload_frame/' + deviceId, { method: 'POST', body: fd });
+                    const resp = await fetch('/upload_frame/' + deviceId, { method: 'POST', body: fd });
+                    
+                    if (resp.status === 403) {
+                        console.warn("Device timed out or not registered. Re-registering...");
+                        register(); // Re-register with the same name
+                    }
                 }, 'image/jpeg', 0.5);
-            }, 250);
+            }, 333); // Slightly slower to save bandwidth
         }
     </script>
 </body>
@@ -487,6 +534,7 @@ def register():
     name = request.json.get("name")
     ip = request.remote_addr
     did = dm.register_device(ip, name)
+    ensure_processor_running(did)  # Start AI processing immediately on registration
     return jsonify({"device_id": did})
 
 @app.route("/upload_frame/<device_id>", methods=["POST"])
@@ -508,17 +556,24 @@ def video_feed(device_id):
 @app.route("/status")
 def status_all():
     dm.remove_inactive_devices()
+    active_ids = dm.get_active_devices()
+    
+    # Pre-initialize any new device states without holding state_lock
+    for cid in active_ids:
+        get_device_state(cid)
+        ensure_processor_running(cid)  # Also ensure processor is running for every active device
+
+    now = time.time()
+    data = {}
     with state_lock:
-        active_ids = dm.get_active_devices()
-        data = {}
-        now = time.time()
         for cid in active_ids:
-            st = get_device_state(cid)
-            tmp = dict(st)
-            tmp.pop("lstm", None); tmp.pop("last_date", None)
+            st = device_states.get(cid)
+            if st is None:
+                continue
+            tmp = {k: v for k, v in st.items() if k not in ("lstm", "last_date", "processed_frame")}
             tmp["cooldown_remaining"] = int(max(0, ALERT_COOLDOWN - (now - st.get("last_alert_time", 0))))
             data[cid] = tmp
-        return jsonify(data)
+    return jsonify(data)
 
 @app.route("/alerts")
 def get_alerts():
@@ -535,8 +590,9 @@ if __name__ == "__main__":
     init_db()
     os.makedirs("alerts", exist_ok=True)
     
-    # Register local webcam by default
-    dm.register_device("127.0.0.1", "Local_0")
+    # Register local webcam by default and start its processor immediately
+    local_did = dm.register_device("127.0.0.1", "Local_0")
+    ensure_processor_running(local_did)
 
     auth_token = os.getenv("NGROK_AUTH_TOKEN")
     if auth_token:
